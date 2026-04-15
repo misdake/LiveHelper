@@ -20,33 +20,50 @@ export interface Config {
 }
 export type Preference = Required<Required<Config>['preference']>
 
-function getArea () {
-  const UseSync = parseJSON(localStorage.getItem(UseSyncKey), false)
-  const area: chrome.storage.StorageArea = UseSync ? chrome.storage.sync : chrome.storage.local
-  return area
+let useSync: boolean | null = null
+
+function getArea(): chrome.storage.StorageArea {
+  return useSync ? chrome.storage.sync : chrome.storage.local
 }
 
-async function get<T> (key: string): Promise<T | undefined> {
-  return new Promise((res, rej) => {
+async function initUseSync(): Promise<boolean> {
+  if (useSync !== null) {
+    return useSync
+  }
+  const storedValue = await new Promise<string | null>((resolve) => {
+    chrome.storage.local.get(UseSyncKey, (items) => {
+      resolve((items[UseSyncKey] as string | null) || null)
+    })
+  })
+  const parsed = parseJSON(storedValue, false)
+  // eslint-disable-next-line require-atomic-updates
+  useSync = parsed
+  return parsed
+}
+
+async function get<T>(key: string): Promise<T | undefined> {
+  await initUseSync()
+  return new Promise((res) => {
     getArea().get(key, (items) => {
-      res(items[key])
+      res(items[key] as T | undefined)
     })
   })
 }
 
 async function set(key: string, value: unknown): Promise<void> {
-  return new Promise((res, rej) => {
+  await initUseSync()
+  return new Promise((res) => {
     getArea().set({
       [key]: value
     }, res)
   })
 }
 
-export function setConfig (config: Config) {
+export async function setConfig(config: Config) {
   return set(ConfigKey, config)
 }
 
-export async function getConfig () {
+export async function getConfig() {
   return await get<Config>(ConfigKey) || {
     preference: {
       interval: 5,
@@ -57,34 +74,48 @@ export async function getConfig () {
   }
 }
 
-export async function getEnabledWebsites () {
+export async function getEnabledWebsites() {
   const cfg = await getConfig()
   return Websites.filter(i => cfg.enabled && cfg.enabled[i.id])
 }
 
-export function setLastPoll(value: Record<string, Living>) {
-  localStorage.setItem(LastPollKey, JSON.stringify(value))
+export async function setLastPoll(value: Record<string, Living>) {
+  await initUseSync()
+  return set(LastPollKey, value)
 }
 
-export function getLastPoll(): Record<string, Living> {
-  return parseJSON(localStorage.getItem(LastPollKey)) || {}
+let lastPollCache: Record<string, Living> = {}
+
+export async function getLastPoll(): Promise<Record<string, Living>> {
+  const result = await get<Record<string, Living>>(LastPollKey)
+  lastPollCache = result || {}
+  return lastPollCache
 }
 
-export function setPollLastPoll(value: number) {
-  localStorage.setItem(PollLastPollKey, JSON.stringify(value))
+export async function setPollLastPoll(value: number) {
+  await initUseSync()
+  return set(PollLastPollKey, value)
 }
 
-export function getPollLastPoll(): number {
-  return parseJSON(localStorage.getItem(PollLastPollKey)) || 0
+let pollLastPollCache: number = 0
+
+export async function getPollLastPoll(): Promise<number> {
+  const result = await get<number>(PollLastPollKey)
+  pollLastPollCache = result || 0
+  return pollLastPollCache
 }
 
-export function setDirty() {
-  localStorage.setItem(DirtyKey, 'true')
+export async function setDirty() {
+  await initUseSync()
+  return set(DirtyKey, true)
 }
 
-export function getDirty() {
-  const ret = localStorage.getItem(DirtyKey) === 'true'
-  localStorage.removeItem(DirtyKey)
+export async function getDirty(): Promise<boolean> {
+  const result = await get<boolean>(DirtyKey)
+  const ret = result === true
+  if (ret) {
+    await set(DirtyKey, false)
+  }
   return ret
 }
 
@@ -96,4 +127,17 @@ export async function getInterval() {
 export async function getSendNotification() {
   const cfg = await getConfig()
   return cfg.preference?.notification ?? true
+}
+
+let configChangeListeners: Array<() => void> = []
+
+export function onConfigChange(callback: () => void) {
+  configChangeListeners.push(callback)
+  return () => {
+    configChangeListeners = configChangeListeners.filter(cb => cb !== callback)
+  }
+}
+
+export function notifyConfigChange() {
+  configChangeListeners.forEach(cb => cb())
 }

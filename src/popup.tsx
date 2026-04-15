@@ -1,56 +1,33 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { render } from 'react-dom'
-import { CacheItem, Living, CacheError, PollErrorType, maybeHas } from './types'
-import { useNow } from './utils'
-import { LocalizationProvider } from './langs'
 import { Localized } from '@fluent/react'
-import { Loading } from './loading'
+import { LocalizationProvider } from './langs'
+import Loading from './loading'
+import { Cache, CacheItem, Living, PollErrorType, CacheError } from './types'
 
-type Cache = Record<string, CacheItem>
+import './styles/popup.less'
 
-const Item: React.FC<{ room: Living }> = ({ room: {
-  preview,
-  title,
-  author,
-  startAt,
-  online,
-  url,
-} }) => {
-  const now = useNow()
-  const onClick = useCallback(() => {
-    window.open(url)
-  }, [url])
-  const hasOnline = maybeHas(online)
-  let timeView = <Localized id='time-started' />
-  if (maybeHas(startAt)) {
-    const sec = now - startAt
-    const min = Math.round(sec / 60)
-    const hour = Math.round(min / 60)
-    timeView = <Localized
-      id='time-passed'
-      $hour={hour}
-      $min={min}
-      $sec={sec}
-    />
-  }
+interface ItemProps {
+  room: Living
+}
 
-  return <div className='room' onClick={onClick}>
-    <img className='preview' alt='preview' src={preview} />
-    <div className='right'>
-      <p className='title'>{title}</p>
-      <div className='detail'>
-        <span className='time'>{timeView}</span>
-        <span className='author'>{author}</span>
-        <span className='online'><Localized
-          id={hasOnline ? 'online' : 'online-placeholder'}
-          $online={online}
-        /></span>
-      </div>
+const Item: React.FC<ItemProps> = ({ room }) => {
+  const handleClick = useCallback(() => {
+    window.open(room.url)
+  }, [room])
+  return <div className='item' onClick={handleClick}>
+    <div className='preview'>
+      <img src={room.preview} alt={room.title} />
+    </div>
+    <div className='info'>
+      <div className='title' title={room.title}>{room.title}</div>
+      <div className='author'>{room.author}</div>
+      <div className='online'>{room.online}</div>
     </div>
   </div>
 }
 
-const ShowError: React.FC<{ err: CacheError }> = ({ err: {type, message} }) => {
+const ShowError: React.FC<{ err: CacheError }> = ({ err: { type, message } }) => {
   if (type === PollErrorType.NotLogin) {
     return <Localized id='error-not-login'><span className='error'>Error not login</span></Localized>
   } else if (message) {
@@ -66,7 +43,7 @@ const Site: React.FC<{
 }> = ({ id, item }) => {
   const handleClick = useCallback(() => {
     window.open(item.info.homepage)
-  }, [ item ])
+  }, [item])
   return <div className='site'>
     <div className="site-header">
       <div className="site-name" onClick={handleClick}>
@@ -79,7 +56,7 @@ const Site: React.FC<{
         item.living.length === 0 ?
           <span className='info'><Localized id='no-room' /></span> :
           item.living.map((i, id) => <Item key={id} room={i} />) :
-        <ShowError err={item.error}/>
+        <ShowError err={item.error} />
     }
   </div>
 }
@@ -90,17 +67,56 @@ const Widget: Record<string, React.ReactElement> = {
 }
 
 const Popup: React.FC = () => {
-  const [ list, setList ] = useState<Cache>({})
-  const [ polling, setPolling ] = useState(false)
+  const [list, setList] = useState<Cache>({})
+  const [polling, setPolling] = useState(false)
+
+  console.log('=== Popup script loaded ===')
+  console.log('=== Popup component rendered ===')
+  console.log('=== Current list:', Object.keys(list))
+  console.log('=== Current polling:', polling)
+
   useEffect(() => {
-    const port = chrome.runtime.connect({name: 'channel'})
-    port.onMessage.addListener((m) => {
-      setList(m.cache)
-      setPolling(m.polling)
+    console.log('=== useEffect called ===')
+
+    const handleMessage = (m: { type: string, cache: Cache, polling: boolean }) => {
+      console.log('=== Message received in popup:', m.type)
+      if (m.type === 'sync') {
+        console.log('=== Sync message received:', {
+          cacheKeys: Object.keys(m.cache || {}),
+          polling: m.polling
+        })
+        setList(m.cache || {})
+        setPolling(m.polling)
+      }
+    }
+
+    console.log('=== Adding message listener ===')
+    chrome.runtime.onMessage.addListener(handleMessage)
+
+    console.log('=== Sending getState message ===')
+    chrome.runtime.sendMessage({ type: 'getState' }, (response) => {
+      console.log('=== getState response:', response)
+      if (response) {
+        console.log('=== Setting state from getState:', {
+          cacheKeys: Object.keys(response.cache || {}),
+          polling: response.polling
+        })
+        setList(response.cache || {})
+        setPolling(response.polling)
+      } else {
+        console.log('=== getState response is null or undefined ===')
+      }
     })
-    return () => port.disconnect()
+
+    return () => {
+      console.log('=== Removing message listener ===')
+      chrome.runtime.onMessage.removeListener(handleMessage)
+    }
   }, [])
+
   const keys = Object.keys(list)
+  console.log('=== Number of sites in list:', keys.length)
+  console.log('=== Site keys:', keys)
 
   return <LocalizationProvider>
     <div className='status' data-polling={polling}>
@@ -110,11 +126,11 @@ const Popup: React.FC = () => {
       </div>
     </div>
     <div>
-      { keys.length > 0 ?
+      {keys.length > 0 ?
         keys.map(k => <Site key={k} id={k} item={list[k]} />) :
         <div className='go-option-tip'>
           <Localized {...Widget} id='goto-option'><></></Localized>
-        </div> }
+        </div>}
     </div>
   </LocalizationProvider>
 }

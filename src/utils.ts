@@ -33,9 +33,28 @@ export function parseJSON(s: any, def: any = undefined) {
 export class LocalMap<V> {
   private mem: Record<string, V>
   private id: ReturnType<typeof setTimeout> | undefined
+  private useChromeStorage: boolean
+  
   constructor(private name: string) {
-    this.mem = parseJSON(window.localStorage.getItem(name)) || {}
+    this.useChromeStorage = typeof window === 'undefined'
+    if (this.useChromeStorage) {
+      this.mem = {}
+      this.loadFromChromeStorage()
+    } else {
+      this.mem = parseJSON(window.localStorage.getItem(name)) || {}
+    }
   }
+  
+  private loadFromChromeStorage() {
+    if (this.useChromeStorage) {
+      chrome.storage.local.get(this.name, (items) => {
+        if (items[this.name]) {
+          this.mem = parseJSON(items[this.name]) || {}
+        }
+      })
+    }
+  }
+  
   set(k: string, v: V) {
     this.mem[k] = v
     this.save()
@@ -56,7 +75,12 @@ export class LocalMap<V> {
       this.id = undefined
     }
     this.id = setTimeout(() => {
-      window.localStorage.setItem(this.name, JSON.stringify(this.mem))
+      const data = JSON.stringify(this.mem)
+      if (this.useChromeStorage) {
+        chrome.storage.local.set({ [this.name]: data })
+      } else {
+        window.localStorage.setItem(this.name, data)
+      }
     }, 0)
   }
   toJSON () {
