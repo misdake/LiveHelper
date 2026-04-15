@@ -33,25 +33,29 @@ export function parseJSON(s: any, def: any = undefined) {
 export class LocalMap<V> {
   private mem: Record<string, V>
   private id: ReturnType<typeof setTimeout> | undefined
-  private useChromeStorage: boolean
+  private initialized: boolean = false
   
   constructor(private name: string) {
-    this.useChromeStorage = typeof window === 'undefined'
-    if (this.useChromeStorage) {
-      this.mem = {}
-      this.loadFromChromeStorage()
-    } else {
-      this.mem = parseJSON(window.localStorage.getItem(name)) || {}
-    }
+    this.mem = {}
   }
   
-  private loadFromChromeStorage() {
-    if (this.useChromeStorage) {
-      chrome.storage.local.get(this.name, (items) => {
-        if (items[this.name]) {
-          this.mem = parseJSON(items[this.name]) || {}
-        }
+  async init(): Promise<void> {
+    if (this.initialized) {
+      return
+    }
+    this.initialized = true
+    
+    if (typeof window === 'undefined') {
+      const items = await new Promise<Record<string, any>>((resolve) => {
+        chrome.storage.local.get(this.name, (result) => {
+          resolve(result)
+        })
       })
+      if (items[this.name]) {
+        this.mem = parseJSON(items[this.name]) || {}
+      }
+    } else {
+      this.mem = parseJSON(window.localStorage.getItem(this.name)) || {}
     }
   }
   
@@ -76,7 +80,7 @@ export class LocalMap<V> {
     }
     this.id = setTimeout(() => {
       const data = JSON.stringify(this.mem)
-      if (this.useChromeStorage) {
+      if (typeof window === 'undefined') {
         chrome.storage.local.set({ [this.name]: data })
       } else {
         window.localStorage.setItem(this.name, data)

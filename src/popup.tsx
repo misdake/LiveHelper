@@ -70,53 +70,29 @@ const Popup: React.FC = () => {
   const [list, setList] = useState<Cache>({})
   const [polling, setPolling] = useState(false)
 
-  console.log('=== Popup script loaded ===')
-  console.log('=== Popup component rendered ===')
-  console.log('=== Current list:', Object.keys(list))
-  console.log('=== Current polling:', polling)
-
   useEffect(() => {
-    console.log('=== useEffect called ===')
-
     const handleMessage = (m: { type: string, cache: Cache, polling: boolean }) => {
-      console.log('=== Message received in popup:', m.type)
       if (m.type === 'sync') {
-        console.log('=== Sync message received:', {
-          cacheKeys: Object.keys(m.cache || {}),
-          polling: m.polling
-        })
         setList(m.cache || {})
         setPolling(m.polling)
       }
     }
 
-    console.log('=== Adding message listener ===')
     chrome.runtime.onMessage.addListener(handleMessage)
 
-    console.log('=== Sending getState message ===')
     chrome.runtime.sendMessage({ type: 'getState' }, (response) => {
-      console.log('=== getState response:', response)
       if (response) {
-        console.log('=== Setting state from getState:', {
-          cacheKeys: Object.keys(response.cache || {}),
-          polling: response.polling
-        })
         setList(response.cache || {})
         setPolling(response.polling)
-      } else {
-        console.log('=== getState response is null or undefined ===')
       }
     })
 
     return () => {
-      console.log('=== Removing message listener ===')
       chrome.runtime.onMessage.removeListener(handleMessage)
     }
   }, [])
 
   const keys = Object.keys(list)
-  console.log('=== Number of sites in list:', keys.length)
-  console.log('=== Site keys:', keys)
 
   return <LocalizationProvider>
     <div className='status' data-polling={polling}>
