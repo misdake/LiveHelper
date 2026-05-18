@@ -34,6 +34,7 @@ export class LocalMap<V> {
   private mem: Record<string, V>
   private id: ReturnType<typeof setTimeout> | undefined
   private initialized: boolean = false
+  private initPromise: Promise<void> | null = null
   
   constructor(private name: string) {
     this.mem = {}
@@ -43,19 +44,29 @@ export class LocalMap<V> {
     if (this.initialized) {
       return
     }
-    this.initialized = true
-    
-    if (typeof window === 'undefined') {
-      const items = await new Promise<Record<string, any>>((resolve) => {
-        chrome.storage.local.get(this.name, (result) => {
-          resolve(result)
+    if (this.initPromise) {
+      await this.initPromise
+      return
+    }
+    this.initPromise = (async () => {
+      if (typeof window === 'undefined') {
+        const items = await new Promise<Record<string, any>>((resolve) => {
+          chrome.storage.local.get(this.name, (result) => {
+            resolve(result)
+          })
         })
-      })
-      if (items[this.name]) {
-        this.mem = parseJSON(items[this.name]) || {}
+        if (items[this.name]) {
+          this.mem = parseJSON(items[this.name]) || {}
+        }
+      } else {
+        this.mem = parseJSON(window.localStorage.getItem(this.name)) || {}
       }
-    } else {
-      this.mem = parseJSON(window.localStorage.getItem(this.name)) || {}
+      this.initialized = true
+    })()
+    try {
+      await this.initPromise
+    } finally {
+      this.initPromise = null
     }
   }
   

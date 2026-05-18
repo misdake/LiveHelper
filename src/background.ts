@@ -16,21 +16,22 @@ interface Message {
 
 let polling = false
 const cache = new LocalMap<CacheItem>('cache')
-
-async function initCache() {
-  await cache.init()
-}
+const cacheReady = cache.init()
 
 chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
-  if (message.type === 'poll') {
-    handlePoll(From.User)
-    sendResponse({ success: true })
-    return true
-  } else if (message.type === 'getState') {
-    sendResponse({
-      cache: cache.toJSON(),
-      polling
-    })
+  if (message.type === 'poll' || message.type === 'getState') {
+    void (async () => {
+      await cacheReady
+      if (message.type === 'poll') {
+        handlePoll(From.User)
+        sendResponse({ success: true })
+      } else {
+        sendResponse({
+          cache: cache.toJSON(),
+          polling
+        })
+      }
+    })()
     return true
   }
   return false
@@ -46,6 +47,7 @@ chrome.alarms.create({
 })
 
 chrome.alarms.onAlarm.addListener(async () => {
+  await cacheReady
   const interval = await config.getInterval() * 60
   if (now() - await config.getPollLastPoll() < interval) {
     return
@@ -56,7 +58,10 @@ chrome.alarms.onAlarm.addListener(async () => {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' || areaName === 'sync') {
     if (changes['config']) {
-      handlePoll(From.ConfigChange)
+      void (async () => {
+        await cacheReady
+        handlePoll(From.ConfigChange)
+      })()
     }
   }
 })
@@ -90,11 +95,12 @@ function endLive(item: Living) {
 }
 
 async function handlePoll(from: From) {
+  await cacheReady
   const enabledWebsites = await config.getEnabledWebsites()
   const cfg = await config.getConfig()
   const notification = !!(cfg.preference?.notification)
 
-  if (notification || from === From.User) {
+  if (notification || from === From.User || from === From.Timer) {
     polling = true
     notifyAll()
 
@@ -195,13 +201,14 @@ async function handlePoll(from: From) {
 }
 
 function notifyAll() {
-  chrome.runtime.sendMessage({
-    type: 'sync',
-    cache: cache.toJSON(),
-    polling,
-  }).catch(() => { })
+  void (async () => {
+    await cacheReady
+    chrome.runtime.sendMessage({
+      type: 'sync',
+      cache: cache.toJSON(),
+      polling,
+    }).catch(() => { })
+  })()
 }
-
-initCache()
 
 export { }
